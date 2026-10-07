@@ -48,6 +48,9 @@ Mesh mesh;
 VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 VkPipeline pipeline = VK_NULL_HANDLE;
 int projection_mode = 0;
+std::array<float, 3> object_position = {0.0F, 0.0F, 0.0F};
+std::array<float, 3> object_rotation = {-20.0F, 30.0F, 0.0F};
+std::array<float, 3> object_scale = {1.0F, 1.0F, 1.0F};
 
 constexpr int perspective_projection = 0;
 constexpr int orthographic_projection = 1;
@@ -95,6 +98,25 @@ Mat4 rotationY(float angle) {
 	result.values[2] = -sine;
 	result.values[8] = sine;
 	result.values[10] = cosine;
+	return result;
+}
+
+Mat4 rotationZ(float angle) {
+	Mat4 result = identityMatrix();
+	const float cosine = std::cos(angle);
+	const float sine = std::sin(angle);
+	result.values[0] = cosine;
+	result.values[1] = sine;
+	result.values[4] = -sine;
+	result.values[5] = cosine;
+	return result;
+}
+
+Mat4 scaling(float x, float y, float z) {
+	Mat4 result = identityMatrix();
+	result.values[0] = x;
+	result.values[5] = y;
+	result.values[10] = z;
 	return result;
 }
 
@@ -487,8 +509,15 @@ void destroyResources() {
 Mat4 createMvp(const VkExtent2D extent) {
 	const float aspect = static_cast<float>(extent.width) /
 	                     static_cast<float>(extent.height);
-	const Mat4 model = multiply(rotationY(30.0F * pi / 180.0F),
-	                            rotationX(-20.0F * pi / 180.0F));
+	const Mat4 scale = scaling(object_scale[0], object_scale[1],
+	                           object_scale[2]);
+	const Mat4 rotation = multiply(
+		rotationZ(object_rotation[2] * pi / 180.0F),
+		multiply(rotationY(object_rotation[1] * pi / 180.0F),
+		         rotationX(object_rotation[0] * pi / 180.0F)));
+	const Mat4 model = multiply(
+		translation(object_position[0], object_position[1], object_position[2]),
+		multiply(rotation, scale));
 	const Mat4 view = translation(0.0F, 0.0F, -3.0F);
 	const Mat4 projection = projection_mode == perspective_projection
 		? perspective(55.0F * pi / 180.0F, aspect, 0.1F, 100.0F)
@@ -540,6 +569,7 @@ void shutdown() {
 }
 
 void update([[maybe_unused]] double time) {
+	ImGui::SetNextWindowSize(ImVec2(420.0F, 330.0F), ImGuiCond_Once);
 	ImGui::Begin("CG Lab 1");
 	ImGui::TextUnformatted("Variant 4");
 	ImGui::TextUnformatted("Truncated regular tetrahedron");
@@ -550,6 +580,18 @@ void update([[maybe_unused]] double time) {
 	ImGui::SameLine();
 	ImGui::RadioButton("Orthographic", &projection_mode,
 	                   orthographic_projection);
+	ImGui::Separator();
+	ImGui::TextUnformatted("Object transform:");
+	ImGui::SliderFloat3("Position", object_position.data(), -2.0F, 2.0F,
+	                    "%.2f");
+	ImGui::SliderFloat3("Rotation", object_rotation.data(), -180.0F, 180.0F,
+	                    "%.1f deg");
+	ImGui::SliderFloat3("Scale", object_scale.data(), 0.1F, 2.5F, "%.2f");
+	if (ImGui::Button("Reset transform")) {
+		object_position = {0.0F, 0.0F, 0.0F};
+		object_rotation = {-20.0F, 30.0F, 0.0F};
+		object_scale = {1.0F, 1.0F, 1.0F};
+	}
 	ImGui::Separator();
 	ImGui::Text("Logical vertices: %d", 12);
 	ImGui::Text("Faces: %d triangles + %d hexagons", 4, 4);
