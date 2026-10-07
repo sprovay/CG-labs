@@ -47,6 +47,10 @@ struct Mat4 {
 Mesh mesh;
 VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 VkPipeline pipeline = VK_NULL_HANDLE;
+int projection_mode = 0;
+
+constexpr int perspective_projection = 0;
+constexpr int orthographic_projection = 1;
 
 constexpr float pi = 3.14159265358979323846F;
 
@@ -112,6 +116,17 @@ Mat4 perspective(float field_of_view, float aspect, float near_plane,
 	result.values[11] = -1.0F;
 	result.values[14] = -(far_plane * near_plane) /
 	                    (far_plane - near_plane);
+	return result;
+}
+
+Mat4 orthographic(float half_height, float aspect, float near_plane,
+	              float far_plane) {
+	const float half_width = half_height * aspect;
+	Mat4 result = identityMatrix();
+	result.values[0] = 1.0F / half_width;
+	result.values[5] = -1.0F / half_height;
+	result.values[10] = 1.0F / (near_plane - far_plane);
+	result.values[14] = near_plane / (near_plane - far_plane);
 	return result;
 }
 
@@ -475,8 +490,9 @@ Mat4 createMvp(const VkExtent2D extent) {
 	const Mat4 model = multiply(rotationY(30.0F * pi / 180.0F),
 	                            rotationX(-20.0F * pi / 180.0F));
 	const Mat4 view = translation(0.0F, 0.0F, -3.0F);
-	const Mat4 projection = perspective(55.0F * pi / 180.0F,
-	                                    aspect, 0.1F, 100.0F);
+	const Mat4 projection = projection_mode == perspective_projection
+		? perspective(55.0F * pi / 180.0F, aspect, 0.1F, 100.0F)
+		: orthographic(1.5F, aspect, 0.1F, 100.0F);
 	return multiply(projection, multiply(view, model));
 }
 
@@ -527,6 +543,13 @@ void update([[maybe_unused]] double time) {
 	ImGui::Begin("CG Lab 1");
 	ImGui::TextUnformatted("Variant 4");
 	ImGui::TextUnformatted("Truncated regular tetrahedron");
+	ImGui::Separator();
+	ImGui::TextUnformatted("Projection:");
+	ImGui::RadioButton("Perspective", &projection_mode,
+	                   perspective_projection);
+	ImGui::SameLine();
+	ImGui::RadioButton("Orthographic", &projection_mode,
+	                   orthographic_projection);
 	ImGui::Separator();
 	ImGui::Text("Logical vertices: %d", 12);
 	ImGui::Text("Faces: %d triangles + %d hexagons", 4, 4);
