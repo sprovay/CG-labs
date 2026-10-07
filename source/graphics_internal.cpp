@@ -256,6 +256,8 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 	vk_swapchain = vkb_swapchain.swapchain;
 	context.swapchain_format = vkb_swapchain.image_format;
 	context.swapchain_extent = vkb_swapchain.extent;
+	width = context.swapchain_extent.width;
+	height = context.swapchain_extent.height;
 
 	auto swapchain_images = vkb_swapchain.get_images().value();
 	auto swapchain_image_views = vkb_swapchain.get_image_views().value();
@@ -284,10 +286,13 @@ bool rebuildSwapchain(uint32_t width, uint32_t height) {
 		.usage = VMA_MEMORY_USAGE_AUTO,
 	};
 
-	if (vmaCreateImage(context.allocator, &depth_buffer, &depth_buffer_allocation,
+	const VkResult depth_buffer_result =
+		vmaCreateImage(context.allocator, &depth_buffer, &depth_buffer_allocation,
 					   &vk_image_depth_buffer, &vma_allocation_depth_buffer,
-					   nullptr) != VK_SUCCESS) {
-		std::cerr << "Failed to allocate and create Vulkan image for depth buffer\n";
+					   nullptr);
+	if (depth_buffer_result != VK_SUCCESS) {
+		std::cerr << "Failed to allocate and create Vulkan image for depth buffer: "
+		          << depth_buffer_result << '\n';
 		return false;
 	}
 
@@ -461,6 +466,8 @@ bool initialize(GLFWwindow* const window) {
 	vk_swapchain_images = vkb_swapchain.get_images().value();
 	vk_swapchain_image_views = vkb_swapchain.get_image_views().value();
 	vk_swapchain_current_image = UINT32_MAX;
+	vk_swapchain_resize_width = context.swapchain_extent.width;
+	vk_swapchain_resize_height = context.swapchain_extent.height;
 
 	const uint32_t swapchain_images_count = uint32_t(vk_swapchain_images.size());
 

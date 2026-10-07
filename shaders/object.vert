@@ -1,0 +1,15 @@
+#version 450
+
+layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec3 in_color;
+
+layout(push_constant) uniform PushConstants {
+	mat4 mvp;
+} push_constants;
+
+layout(location = 0) out vec3 vertex_color;
+
+void main() {
+	gl_Position = push_constants.mvp * vec4(in_position, 1.0);
+	vertex_color = in_color;
+}
