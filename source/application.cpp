@@ -1,5 +1,6 @@
 #include "application.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -51,6 +52,13 @@ int projection_mode = 0;
 std::array<float, 3> object_position = {0.0F, 0.0F, 0.0F};
 std::array<float, 3> object_rotation = {-20.0F, 30.0F, 0.0F};
 std::array<float, 3> object_scale = {1.0F, 1.0F, 1.0F};
+bool animation_playing = true;
+float animation_speed = 1.0F;
+std::array<float, 3> trajectory_amplitude = {0.75F, 0.40F, 0.40F};
+std::array<float, 3> trajectory_frequency = {1.00F, 2.00F, 1.50F};
+std::array<float, 3> rotation_speed = {35.0F, 70.0F, 20.0F};
+double previous_frame_time = 0.0;
+double animation_time = 0.0;
 
 constexpr int perspective_projection = 0;
 constexpr int orthographic_projection = 1;
@@ -509,14 +517,25 @@ void destroyResources() {
 Mat4 createMvp(const VkExtent2D extent) {
 	const float aspect = static_cast<float>(extent.width) /
 	                     static_cast<float>(extent.height);
+	const float time = static_cast<float>(animation_time);
+	std::array<float, 3> animated_position{};
+	std::array<float, 3> animated_rotation{};
+	for (size_t axis = 0; axis < 3; ++axis) {
+		animated_position[axis] = object_position[axis] +
+			trajectory_amplitude[axis] *
+			std::sin(trajectory_frequency[axis] * time);
+		animated_rotation[axis] = object_rotation[axis] +
+			rotation_speed[axis] * time;
+	}
 	const Mat4 scale = scaling(object_scale[0], object_scale[1],
 	                           object_scale[2]);
 	const Mat4 rotation = multiply(
-		rotationZ(object_rotation[2] * pi / 180.0F),
-		multiply(rotationY(object_rotation[1] * pi / 180.0F),
-		         rotationX(object_rotation[0] * pi / 180.0F)));
+		rotationZ(animated_rotation[2] * pi / 180.0F),
+		multiply(rotationY(animated_rotation[1] * pi / 180.0F),
+		         rotationX(animated_rotation[0] * pi / 180.0F)));
 	const Mat4 model = multiply(
-		translation(object_position[0], object_position[1], object_position[2]),
+		translation(animated_position[0], animated_position[1],
+		            animated_position[2]),
 		multiply(rotation, scale));
 	const Mat4 view = translation(0.0F, 0.0F, -3.0F);
 	const Mat4 projection = projection_mode == perspective_projection
@@ -568,8 +587,17 @@ void shutdown() {
 	destroyResources();
 }
 
-void update([[maybe_unused]] double time) {
-	ImGui::SetNextWindowSize(ImVec2(420.0F, 330.0F), ImGuiCond_Once);
+void update(double time) {
+	double delta_time = previous_frame_time == 0.0
+		? 0.0
+		: time - previous_frame_time;
+	previous_frame_time = time;
+	delta_time = std::clamp(delta_time, 0.0, 0.1);
+	if (animation_playing) {
+		animation_time += delta_time * static_cast<double>(animation_speed);
+	}
+
+	ImGui::SetNextWindowSize(ImVec2(470.0F, 540.0F), ImGuiCond_Once);
 	ImGui::Begin("CG Lab 1");
 	ImGui::TextUnformatted("Variant 4");
 	ImGui::TextUnformatted("Truncated regular tetrahedron");
@@ -592,6 +620,25 @@ void update([[maybe_unused]] double time) {
 		object_rotation = {-20.0F, 30.0F, 0.0F};
 		object_scale = {1.0F, 1.0F, 1.0F};
 	}
+	ImGui::Separator();
+	ImGui::TextUnformatted("3D Lissajous animation:");
+	if (ImGui::Button(animation_playing ? "Pause animation"
+	                                  : "Play animation")) {
+		animation_playing = !animation_playing;
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Restart")) {
+		animation_time = 0.0;
+	}
+	ImGui::SliderFloat("Animation speed", &animation_speed, 0.0F, 3.0F,
+	                   "%.2f");
+	ImGui::SliderFloat3("Path amplitude", trajectory_amplitude.data(),
+	                    0.0F, 1.5F, "%.2f");
+	ImGui::SliderFloat3("Path frequency", trajectory_frequency.data(),
+	                    0.1F, 3.0F, "%.2f");
+	ImGui::SliderFloat3("Rotation speed", rotation_speed.data(),
+	                    -180.0F, 180.0F, "%.1f deg/s");
+	ImGui::Text("Animation time: %.2f s", animation_time);
 	ImGui::Separator();
 	ImGui::Text("Logical vertices: %d", 12);
 	ImGui::Text("Faces: %d triangles + %d hexagons", 4, 4);
