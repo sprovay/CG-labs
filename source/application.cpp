@@ -31,6 +31,7 @@ struct Vertex {
 struct Buffer {
 	VkBuffer handle = VK_NULL_HANDLE;
 	VmaAllocation allocation = VK_NULL_HANDLE;
+	void* mapped_data = nullptr;
 };
 
 struct Mesh {
@@ -44,17 +45,29 @@ struct Mat4 {
 	std::array<float, 16> values{};
 };
 
-struct PushConstants {
+struct UniformData {
 	Mat4 mvp;
 	std::array<float, 4> object_color;
 };
 
-static_assert(offsetof(PushConstants, object_color) == 64);
-static_assert(sizeof(PushConstants) == 80);
+static_assert(offsetof(UniformData, object_color) == 64);
+static_assert(sizeof(UniformData) == 80);
+
+struct SceneObject {
+	Vec3 position_offset;
+	Vec3 rotation_offset;
+	float scale_multiplier;
+	std::array<float, 4> color;
+	float animation_phase;
+	Buffer uniform_buffer;
+	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+};
 
 Mesh mesh;
 VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 VkPipeline pipeline = VK_NULL_HANDLE;
+VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
+VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 int projection_mode = 0;
 std::array<float, 3> object_position = {0.0F, 0.0F, 0.0F};
 std::array<float, 3> object_rotation = {-20.0F, 30.0F, 0.0F};
@@ -67,6 +80,31 @@ std::array<float, 3> rotation_speed = {35.0F, 70.0F, 20.0F};
 std::array<float, 4> object_color = {1.0F, 1.0F, 1.0F, 1.0F};
 double previous_frame_time = 0.0;
 double animation_time = 0.0;
+
+constexpr size_t scene_object_count = 3;
+std::array<SceneObject, scene_object_count> scene_objects = {{
+	{
+		.position_offset = {-1.15F, 0.0F, 0.0F},
+		.rotation_offset = {0.0F, 0.0F, 0.0F},
+		.scale_multiplier = 0.55F,
+		.color = {1.0F, 0.55F, 0.55F, 1.0F},
+		.animation_phase = 0.0F,
+	},
+	{
+		.position_offset = {0.0F, 0.0F, 0.0F},
+		.rotation_offset = {30.0F, 45.0F, 0.0F},
+		.scale_multiplier = 0.55F,
+		.color = {0.55F, 1.0F, 0.65F, 1.0F},
+		.animation_phase = 2.0943951F,
+	},
+	{
+		.position_offset = {1.15F, 0.0F, 0.0F},
+		.rotation_offset = {-25.0F, 20.0F, 35.0F},
+		.scale_multiplier = 0.55F,
+		.color = {0.60F, 0.70F, 1.0F, 1.0F},
+		.animation_phase = 4.1887902F,
+	},
+}};
 
 constexpr int perspective_projection = 0;
 constexpr int orthographic_projection = 1;
@@ -282,10 +320,96 @@ bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 		result = {};
 		return false;
 	}
+	result.mapped_data = created_allocation_info.pMappedData;
 
-	std::memcpy(created_allocation_info.pMappedData, data,
-	            static_cast<size_t>(size));
-	vmaFlushAllocation(context.allocator, result.allocation, 0, size);
+	if (data != nullptr) {
+		std::memcpy(result.mapped_data, data, static_cast<size_t>(size));
+		vmaFlushAllocation(context.allocator, result.allocation, 0, size);
+	}
+	return true;
+}
+
+bool createDescriptorResources() {
+	auto& context = graphics::internal::context;
+	const VkDescriptorSetLayoutBinding uniform_binding = {
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
+		              VK_SHADER_STAGE_FRAGMENT_BIT,
+	};
+	const VkDescriptorSetLayoutCreateInfo layout_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.bindingCount = 1,
+		.pBindings = &uniform_binding,
+	};
+	if (vkCreateDescriptorSetLayout(context.device, &layout_info, nullptr,
+	                                &descriptor_set_layout) != VK_SUCCESS) {
+		return false;
+	}
+
+	const UniformData initial_uniform = {
+		.mvp = identityMatrix(),
+		.object_color = {1.0F, 1.0F, 1.0F, 1.0F},
+	};
+	for (SceneObject& object : scene_objects) {
+		if (!createBuffer(sizeof(UniformData),
+		                  VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+		                  &initial_uniform, object.uniform_buffer)) {
+			return false;
+		}
+	}
+
+	const VkDescriptorPoolSize pool_size = {
+		.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		.descriptorCount = static_cast<uint32_t>(scene_object_count),
+	};
+	const VkDescriptorPoolCreateInfo pool_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.maxSets = static_cast<uint32_t>(scene_object_count),
+		.poolSizeCount = 1,
+		.pPoolSizes = &pool_size,
+	};
+	if (vkCreateDescriptorPool(context.device, &pool_info, nullptr,
+	                           &descriptor_pool) != VK_SUCCESS) {
+		return false;
+	}
+
+	std::array<VkDescriptorSetLayout, scene_object_count> layouts{};
+	layouts.fill(descriptor_set_layout);
+	std::array<VkDescriptorSet, scene_object_count> descriptor_sets{};
+	const VkDescriptorSetAllocateInfo allocation_info = {
+		.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		.descriptorPool = descriptor_pool,
+		.descriptorSetCount = static_cast<uint32_t>(descriptor_sets.size()),
+		.pSetLayouts = layouts.data(),
+	};
+	if (vkAllocateDescriptorSets(context.device, &allocation_info,
+	                             descriptor_sets.data()) != VK_SUCCESS) {
+		return false;
+	}
+
+	std::array<VkDescriptorBufferInfo, scene_object_count> buffer_infos{};
+	std::array<VkWriteDescriptorSet, scene_object_count> writes{};
+	for (size_t i = 0; i < scene_objects.size(); ++i) {
+		scene_objects[i].descriptor_set = descriptor_sets[i];
+		buffer_infos[i] = {
+			.buffer = scene_objects[i].uniform_buffer.handle,
+			.offset = 0,
+			.range = sizeof(UniformData),
+		};
+		writes[i] = {
+			.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			.dstSet = descriptor_sets[i],
+			.dstBinding = 0,
+			.descriptorCount = 1,
+			.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			.pBufferInfo = &buffer_infos[i],
+		};
+	}
+	vkUpdateDescriptorSets(context.device,
+	                       static_cast<uint32_t>(writes.size()),
+	                       writes.data(), 0, nullptr);
 	return true;
 }
 
@@ -434,16 +558,10 @@ bool createPipeline() {
 		.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size()),
 		.pDynamicStates = dynamic_states.data(),
 	};
-	const VkPushConstantRange push_constant_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
-		              VK_SHADER_STAGE_FRAGMENT_BIT,
-		.offset = 0,
-		.size = sizeof(PushConstants),
-	};
 	const VkPipelineLayoutCreateInfo layout_info = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-		.pushConstantRangeCount = 1,
-		.pPushConstantRanges = &push_constant_range,
+		.setLayoutCount = 1,
+		.pSetLayouts = &descriptor_set_layout,
 	};
 	if (vkCreatePipelineLayout(context.device, &layout_info, nullptr,
 	                           &pipeline_layout) != VK_SUCCESS) {
@@ -494,6 +612,24 @@ void destroyResources() {
 		vkDestroyPipelineLayout(context.device, pipeline_layout, nullptr);
 		pipeline_layout = VK_NULL_HANDLE;
 	}
+	if (descriptor_pool != VK_NULL_HANDLE) {
+		vkDestroyDescriptorPool(context.device, descriptor_pool, nullptr);
+		descriptor_pool = VK_NULL_HANDLE;
+	}
+	for (SceneObject& object : scene_objects) {
+		if (object.uniform_buffer.handle != VK_NULL_HANDLE) {
+			vmaDestroyBuffer(context.allocator,
+			                 object.uniform_buffer.handle,
+			                 object.uniform_buffer.allocation);
+		}
+		object.uniform_buffer = {};
+		object.descriptor_set = VK_NULL_HANDLE;
+	}
+	if (descriptor_set_layout != VK_NULL_HANDLE) {
+		vkDestroyDescriptorSetLayout(context.device,
+		                             descriptor_set_layout, nullptr);
+		descriptor_set_layout = VK_NULL_HANDLE;
+	}
 	if (mesh.index_buffer.handle != VK_NULL_HANDLE) {
 		vmaDestroyBuffer(context.allocator, mesh.index_buffer.handle,
 		                 mesh.index_buffer.allocation);
@@ -505,21 +641,36 @@ void destroyResources() {
 	mesh = {};
 }
 
-Mat4 createMvp(const VkExtent2D extent) {
+Mat4 createMvp(const VkExtent2D extent, const SceneObject& object) {
 	const float aspect = static_cast<float>(extent.width) /
 	                     static_cast<float>(extent.height);
-	const float time = static_cast<float>(animation_time);
+	const float time = static_cast<float>(animation_time) +
+	                   object.animation_phase;
+	const std::array<float, 3> position_offsets = {
+		object.position_offset.x,
+		object.position_offset.y,
+		object.position_offset.z,
+	};
+	const std::array<float, 3> rotation_offsets = {
+		object.rotation_offset.x,
+		object.rotation_offset.y,
+		object.rotation_offset.z,
+	};
 	std::array<float, 3> animated_position{};
 	std::array<float, 3> animated_rotation{};
 	for (size_t axis = 0; axis < 3; ++axis) {
 		animated_position[axis] = object_position[axis] +
+			position_offsets[axis] +
 			trajectory_amplitude[axis] *
 			std::sin(trajectory_frequency[axis] * time);
 		animated_rotation[axis] = object_rotation[axis] +
+			rotation_offsets[axis] +
 			rotation_speed[axis] * time;
 	}
-	const Mat4 scale = scaling(object_scale[0], object_scale[1],
-	                           object_scale[2]);
+	const Mat4 scale = scaling(
+		object_scale[0] * object.scale_multiplier,
+		object_scale[1] * object.scale_multiplier,
+		object_scale[2] * object.scale_multiplier);
 	const Mat4 rotation = multiply(
 		rotationZ(animated_rotation[2] * pi / 180.0F),
 		multiply(rotationY(animated_rotation[1] * pi / 180.0F),
@@ -556,6 +707,11 @@ bool initialize() {
 		return false;
 	}
 	mesh.index_count = static_cast<uint32_t>(indices.size());
+	if (!createDescriptorResources()) {
+		std::cerr << "Failed to create descriptor resources\n";
+		destroyResources();
+		return false;
+	}
 
 	try {
 		if (!createPipeline()) {
@@ -600,7 +756,7 @@ void update(double time) {
 	ImGui::RadioButton("Orthographic", &projection_mode,
 	                   orthographic_projection);
 	ImGui::Separator();
-	ImGui::TextUnformatted("Object transform:");
+	ImGui::TextUnformatted("Common transform:");
 	ImGui::SliderFloat3("Position", object_position.data(), -2.0F, 2.0F,
 	                    "%.2f");
 	ImGui::SliderFloat3("Rotation", object_rotation.data(), -180.0F, 180.0F,
@@ -632,11 +788,15 @@ void update(double time) {
 	ImGui::Text("Animation time: %.2f s", animation_time);
 	ImGui::Separator();
 	ImGui::TextUnformatted("Appearance:");
-	ImGui::ColorEdit3("Object color", object_color.data());
+	ImGui::ColorEdit3("Common tint", object_color.data());
 	ImGui::Separator();
+	ImGui::Text("Objects / descriptor sets: %zu", scene_objects.size());
 	ImGui::Text("Logical vertices: %d", 12);
 	ImGui::Text("Faces: %d triangles + %d hexagons", 4, 4);
-	ImGui::Text("Rendered triangles: %u", mesh.index_count / 3);
+	ImGui::Text("Triangles: %u per object, %zu total",
+	            mesh.index_count / 3,
+	            static_cast<size_t>(mesh.index_count / 3) *
+	            scene_objects.size());
 	ImGui::End();
 }
 
@@ -684,15 +844,29 @@ void render(const graphics::internal::FrameData& fd) {
 	                       &mesh.vertex_buffer.handle, &vertex_offset);
 	vkCmdBindIndexBuffer(fd.command_buffer, mesh.index_buffer.handle,
 	                     0, VK_INDEX_TYPE_UINT32);
-	const PushConstants push_constants = {
-		.mvp = createMvp(context.swapchain_extent),
-		.object_color = object_color,
-	};
-	vkCmdPushConstants(fd.command_buffer, pipeline_layout,
-	                   VK_SHADER_STAGE_VERTEX_BIT |
-	                   VK_SHADER_STAGE_FRAGMENT_BIT,
-	                   0, sizeof(push_constants), &push_constants);
-	vkCmdDrawIndexed(fd.command_buffer, mesh.index_count, 1, 0, 0, 0);
+
+	for (SceneObject& object : scene_objects) {
+		UniformData uniform_data = {
+			.mvp = createMvp(context.swapchain_extent, object),
+			.object_color = {
+				object.color[0] * object_color[0],
+				object.color[1] * object_color[1],
+				object.color[2] * object_color[2],
+				object.color[3] * object_color[3],
+			},
+		};
+		std::memcpy(object.uniform_buffer.mapped_data, &uniform_data,
+		            sizeof(uniform_data));
+		vmaFlushAllocation(context.allocator,
+		                   object.uniform_buffer.allocation,
+		                   0, sizeof(uniform_data));
+		vkCmdBindDescriptorSets(fd.command_buffer,
+		                        VK_PIPELINE_BIND_POINT_GRAPHICS,
+		                        pipeline_layout, 0, 1,
+		                        &object.descriptor_set,
+		                        0, nullptr);
+		vkCmdDrawIndexed(fd.command_buffer, mesh.index_count, 1, 0, 0, 0);
+	}
 
 	vkCmdEndRenderPass(fd.command_buffer);
 	vkEndCommandBuffer(fd.command_buffer);
