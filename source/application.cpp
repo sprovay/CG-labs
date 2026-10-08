@@ -26,7 +26,6 @@ struct Vec3 {
 
 struct Vertex {
 	Vec3 position;
-	Vec3 color;
 };
 
 struct Buffer {
@@ -65,7 +64,7 @@ float animation_speed = 1.0F;
 std::array<float, 3> trajectory_amplitude = {0.75F, 0.40F, 0.40F};
 std::array<float, 3> trajectory_frequency = {1.00F, 2.00F, 1.50F};
 std::array<float, 3> rotation_speed = {35.0F, 70.0F, 20.0F};
-std::array<float, 4> object_color = {0.20F, 0.70F, 0.90F, 1.0F};
+std::array<float, 4> object_color = {1.0F, 1.0F, 1.0F, 1.0F};
 double previous_frame_time = 0.0;
 double animation_time = 0.0;
 
@@ -186,12 +185,11 @@ Vec3 pointOnTruncatedEdge(const Vec3& from, const Vec3& to) {
 
 void appendFace(const std::vector<Vec3>& positions,
 	            const std::vector<uint32_t>& face,
-	            const Vec3& color,
 	            std::vector<Vertex>& vertices,
 	            std::vector<uint32_t>& indices) {
 	const uint32_t first_vertex = static_cast<uint32_t>(vertices.size());
 	for (const uint32_t position_index : face) {
-		vertices.push_back({ positions[position_index], color });
+		vertices.push_back({ positions[position_index] });
 	}
 
 	for (uint32_t i = 1; i + 1 < face.size(); ++i) {
@@ -226,17 +224,6 @@ void createTruncatedTetrahedron(std::vector<Vertex>& vertices,
 		}
 	}
 
-	const std::array<Vec3, 8> face_colors = {
-		Vec3{0.90F, 0.25F, 0.22F},
-		Vec3{0.20F, 0.70F, 0.30F},
-		Vec3{0.20F, 0.45F, 0.90F},
-		Vec3{0.90F, 0.65F, 0.15F},
-		Vec3{0.70F, 0.25F, 0.85F},
-		Vec3{0.15F, 0.75F, 0.75F},
-		Vec3{0.95F, 0.45F, 0.65F},
-		Vec3{0.55F, 0.70F, 0.20F},
-	};
-
 	// Four triangular faces around the original tetrahedron vertices.
 	for (uint32_t center = 0; center < 4; ++center) {
 		std::vector<uint32_t> face;
@@ -245,7 +232,7 @@ void createTruncatedTetrahedron(std::vector<Vertex>& vertices,
 				face.push_back(edge_indices[center][other]);
 			}
 		}
-		appendFace(positions, face, face_colors[center], vertices, indices);
+		appendFace(positions, face, vertices, indices);
 	}
 
 	// Every original triangular face becomes a regular hexagon.
@@ -265,7 +252,7 @@ void createTruncatedTetrahedron(std::vector<Vertex>& vertices,
 			{ edge_indices[a][b], edge_indices[b][a],
 			  edge_indices[b][c], edge_indices[c][b],
 			  edge_indices[c][a], edge_indices[a][c] },
-			face_colors[4 + face_index], vertices, indices);
+			vertices, indices);
 	}
 }
 
@@ -376,18 +363,12 @@ bool createPipeline() {
 		.stride = sizeof(Vertex),
 		.inputRate = VK_VERTEX_INPUT_RATE_VERTEX,
 	};
-	const std::array<VkVertexInputAttributeDescription, 2> attributes = {{
+	const std::array<VkVertexInputAttributeDescription, 1> attributes = {{
 		{
 			.location = 0,
 			.binding = 0,
 			.format = VK_FORMAT_R32G32B32_SFLOAT,
 			.offset = offsetof(Vertex, position),
-		},
-		{
-			.location = 1,
-			.binding = 0,
-			.format = VK_FORMAT_R32G32B32_SFLOAT,
-			.offset = offsetof(Vertex, color),
 		},
 	}};
 	const VkPipelineVertexInputStateCreateInfo vertex_input = {
