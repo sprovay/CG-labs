@@ -262,7 +262,6 @@ void createTruncatedTetrahedron(std::vector<Vertex>& vertices,
 		}
 	}
 
-	// Four triangular faces around the original tetrahedron vertices.
 	for (uint32_t center = 0; center < 4; ++center) {
 		std::vector<uint32_t> face;
 		for (uint32_t other = 0; other < 4; ++other) {
@@ -273,7 +272,6 @@ void createTruncatedTetrahedron(std::vector<Vertex>& vertices,
 		appendFace(positions, face, vertices, indices);
 	}
 
-	// Every original triangular face becomes a regular hexagon.
 	const std::array<std::array<uint32_t, 3>, 4> original_faces = {{
 		{0, 1, 2},
 		{0, 3, 1},
