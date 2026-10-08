@@ -45,6 +45,14 @@ struct Mat4 {
 	std::array<float, 16> values{};
 };
 
+struct PushConstants {
+	Mat4 mvp;
+	std::array<float, 4> object_color;
+};
+
+static_assert(offsetof(PushConstants, object_color) == 64);
+static_assert(sizeof(PushConstants) == 80);
+
 Mesh mesh;
 VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 VkPipeline pipeline = VK_NULL_HANDLE;
@@ -57,6 +65,7 @@ float animation_speed = 1.0F;
 std::array<float, 3> trajectory_amplitude = {0.75F, 0.40F, 0.40F};
 std::array<float, 3> trajectory_frequency = {1.00F, 2.00F, 1.50F};
 std::array<float, 3> rotation_speed = {35.0F, 70.0F, 20.0F};
+std::array<float, 4> object_color = {0.20F, 0.70F, 0.90F, 1.0F};
 double previous_frame_time = 0.0;
 double animation_time = 0.0;
 
@@ -445,9 +454,10 @@ bool createPipeline() {
 		.pDynamicStates = dynamic_states.data(),
 	};
 	const VkPushConstantRange push_constant_range = {
-		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+		.stageFlags = VK_SHADER_STAGE_VERTEX_BIT |
+		              VK_SHADER_STAGE_FRAGMENT_BIT,
 		.offset = 0,
-		.size = sizeof(Mat4),
+		.size = sizeof(PushConstants),
 	};
 	const VkPipelineLayoutCreateInfo layout_info = {
 		.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -640,6 +650,9 @@ void update(double time) {
 	                    -180.0F, 180.0F, "%.1f deg/s");
 	ImGui::Text("Animation time: %.2f s", animation_time);
 	ImGui::Separator();
+	ImGui::TextUnformatted("Appearance:");
+	ImGui::ColorEdit3("Object color", object_color.data());
+	ImGui::Separator();
 	ImGui::Text("Logical vertices: %d", 12);
 	ImGui::Text("Faces: %d triangles + %d hexagons", 4, 4);
 	ImGui::Text("Rendered triangles: %u", mesh.index_count / 3);
@@ -690,9 +703,14 @@ void render(const graphics::internal::FrameData& fd) {
 	                       &mesh.vertex_buffer.handle, &vertex_offset);
 	vkCmdBindIndexBuffer(fd.command_buffer, mesh.index_buffer.handle,
 	                     0, VK_INDEX_TYPE_UINT32);
-	const Mat4 mvp = createMvp(context.swapchain_extent);
+	const PushConstants push_constants = {
+		.mvp = createMvp(context.swapchain_extent),
+		.object_color = object_color,
+	};
 	vkCmdPushConstants(fd.command_buffer, pipeline_layout,
-	                   VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp), &mvp);
+	                   VK_SHADER_STAGE_VERTEX_BIT |
+	                   VK_SHADER_STAGE_FRAGMENT_BIT,
+	                   0, sizeof(push_constants), &push_constants);
 	vkCmdDrawIndexed(fd.command_buffer, mesh.index_count, 1, 0, 0, 0);
 
 	vkCmdEndRenderPass(fd.command_buffer);
