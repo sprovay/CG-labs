@@ -1,4 +1,1 @@
-build-*/
-shaders/*.spv
-imgui.ini
 .vscode/
