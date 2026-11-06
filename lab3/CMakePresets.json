@@ -18,7 +18,7 @@
 		{
 			"name": "release",
 			"inherits": "common",
-			"binaryDir": "build-release",
+			"binaryDir": "build-lab3-release",
 			"cacheVariables": {
 				"CMAKE_BUILD_TYPE": "Release"
 			}

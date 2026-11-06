@@ -2,6 +2,7 @@
 
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec2 in_uv;
 
 layout(set = 0, binding = 0) uniform SceneUniforms {
 	mat4 view_projection;
@@ -21,12 +22,14 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 
 layout(location = 0) out vec3 world_position;
 layout(location = 1) out vec3 world_normal;
-layout(location = 2) out vec3 vertex_color;
+layout(location = 2) out vec2 texcoord;
+layout(location = 3) out vec3 vertex_color;
 
 void main() {
 	vec4 world = model_data.model * vec4(in_position, 1.0);
 	world_position = world.xyz;
 	world_normal = normalize(mat3(model_data.normal_matrix) * in_normal);
+	texcoord = in_uv;
 	vertex_color = clamp(in_position * 0.8660254 + vec3(0.5), 0.0, 1.0);
 	gl_Position = scene.view_projection * world;
 }

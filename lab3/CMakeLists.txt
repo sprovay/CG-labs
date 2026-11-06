@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 include(FetchContent)
 
-project(cg-lab2 LANGUAGES C CXX)
+project(cg-lab3 LANGUAGES C CXX)
 
 add_executable(${PROJECT_NAME} source/main.cpp source/graphics_internal.cpp source/application.cpp)
+target_include_directories(${PROJECT_NAME} PRIVATE third_party)
 
 if(LINUX)
 	target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -Wno-missing-field-initializers)

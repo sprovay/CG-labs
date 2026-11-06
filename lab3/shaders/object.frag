@@ -2,7 +2,8 @@
 
 layout(location = 0) in vec3 world_position;
 layout(location = 1) in vec3 world_normal;
-layout(location = 2) in vec3 vertex_color;
+layout(location = 2) in vec2 texcoord;
+layout(location = 3) in vec3 vertex_color;
 layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform SceneUniforms {
@@ -41,26 +42,59 @@ layout(set = 1, binding = 0) uniform ModelUniforms {
 	vec4 specular_shininess;
 } model_data;
 
+layout(set = 1, binding = 1) uniform sampler2D albedo_texture;
+layout(set = 1, binding = 2) uniform sampler2D specular_texture;
+layout(set = 1, binding = 3) uniform sampler2D emissive_texture;
+
+layout(push_constant) uniform TextureEffect {
+	float time;
+	float strength;
+	int enabled;
+	int legacy_vertex_colors;
+} effect;
+
+vec3 sampled_albedo;
+vec3 sampled_specular;
+
 vec3 blinnPhong(vec3 normal, vec3 light_direction, vec3 view_direction,
 	             vec3 light_color, float intensity) {
 	float diffuse_factor = max(dot(normal, light_direction), 0.0);
-	vec3 diffuse = model_data.albedo.rgb * vertex_color * light_color *
+	vec3 diffuse = sampled_albedo * light_color *
 	               intensity * diffuse_factor;
 	vec3 specular = vec3(0.0);
 	if (diffuse_factor > 0.0) {
 		vec3 halfway_direction = normalize(light_direction + view_direction);
 		float highlight = pow(max(dot(normal, halfway_direction), 0.0),
 		                      model_data.specular_shininess.a);
-		specular = model_data.specular_shininess.rgb * light_color *
+		specular = sampled_specular * light_color *
 		           intensity * highlight;
 	}
 	return diffuse + specular;
 }
 
 void main() {
+	vec3 base = effect.legacy_vertex_colors != 0
+		? vertex_color : texture(albedo_texture, texcoord).rgb;
+	if (effect.enabled != 0 && effect.legacy_vertex_colors == 0) {
+		vec2 drift = 0.18 * vec2(sin(effect.time * 0.73),
+		                              cos(effect.time * 0.51));
+		vec2 warped = texcoord * 2.0 + drift +
+		              0.05 * sin(vec2(texcoord.y, texcoord.x) * 18.0 +
+		                         effect.time * 2.0);
+		vec3 second = texture(albedo_texture, warped).rgb;
+		float pulse = 0.5 + 0.5 * sin(effect.time * 1.8 +
+		                              (texcoord.x + texcoord.y) * 9.0);
+		base = mix(base, second, effect.strength * (0.25 + 0.45 * pulse));
+		base *= 1.0 + effect.strength * 0.25 *
+		        sin(effect.time * 2.4 + texcoord.x * 12.0);
+	}
+	sampled_albedo = base * model_data.albedo.rgb;
+	sampled_specular = model_data.specular_shininess.rgb *
+	                   (effect.legacy_vertex_colors != 0
+	                    ? vec3(1.0) : texture(specular_texture, texcoord).rgb);
 	vec3 normal = normalize(world_normal);
 	vec3 view_direction = normalize(scene.camera_position.xyz - world_position);
-	vec3 lighting = model_data.albedo.rgb * vertex_color *
+	vec3 lighting = sampled_albedo *
 	                scene.ambient_color_intensity.rgb *
 	                scene.ambient_color_intensity.a;
 
@@ -93,6 +127,9 @@ void main() {
 		                       distance_squared);
 	}
 
+	if (effect.legacy_vertex_colors == 0) {
+		lighting += texture(emissive_texture, texcoord).rgb;
+	}
 	vec3 mapped = lighting / (lighting + vec3(1.0));
 	mapped = pow(mapped, vec3(1.0 / 2.2));
 	out_color = vec4(mapped, model_data.albedo.a);
